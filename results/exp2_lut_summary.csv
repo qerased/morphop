@@ -1,0 +1,8 @@
+operator,changed_configurations,ones_in_lut
+clean,1,255
+fill,16,272
+majority,186,256
+endpoints,248,8
+spur,8,248
+bridge,123,379
+hbreak,2,254
