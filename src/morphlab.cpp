@@ -358,6 +358,35 @@ static cv::Mat blank(int rows, int cols) {
     return cv::Mat(rows, cols, CV_8UC1, cv::Scalar(0));
 }
 
+static cv::Mat dilateByOffsets(const cv::Mat& binary, const std::vector<cv::Point>& offsets) {
+    cv::Mat out(binary.size(), CV_8UC1, cv::Scalar(0));
+    for (int y = 0; y < binary.rows; ++y) {
+        for (int x = 0; x < binary.cols; ++x) {
+            if (binary.at<uchar>(y, x) == 0) {
+                continue;
+            }
+            for (const cv::Point& offset : offsets) {
+                int nx = x + offset.x;
+                int ny = y + offset.y;
+                if (0 <= nx && nx < binary.cols && 0 <= ny && ny < binary.rows) {
+                    out.at<uchar>(ny, nx) = 255;
+                }
+            }
+        }
+    }
+    return out;
+}
+
+static cv::Mat makeDilationScene() {
+    cv::Mat img = blank(48, 72);
+    cv::rectangle(img, {8, 10}, {20, 22}, 255, cv::FILLED);
+    cv::line(img, {36, 8}, {56, 28}, 255, 1);
+    cv::line(img, {48, 9}, {48, 36}, 255, 1);
+    img.at<uchar>(38, 62) = 255;
+    img.at<uchar>(38, 64) = 255;
+    return img;
+}
+
 static void writeLutCsv(const fs::path& path, const std::string& op) {
     auto lut = buildLut(op);
     std::ofstream f(path);
@@ -375,18 +404,22 @@ static void writeLutCsv(const fs::path& path, const std::string& op) {
 static void writeAllLutCsv(const fs::path& path) {
     std::vector<std::string> ops = {"clean", "fill", "majority", "endpoints", "spur", "bridge", "hbreak"};
     std::ofstream f(path);
-    f << "operator,changed_configurations,ones_in_lut\n";
+    f << "operator,changed_configurations,added_configurations,removed_configurations,ones_in_lut\n";
     for (const auto& op : ops) {
         auto lut = buildLut(op);
         int changed = 0;
+        int added = 0;
+        int removed = 0;
         int ones = 0;
         for (int code = 0; code < 512; ++code) {
             bool center = bit(static_cast<uint16_t>(code), kCenter);
             bool out = lut[code] > 0;
             changed += center != out;
+            added += !center && out;
+            removed += center && !out;
             ones += out;
         }
-        f << op << "," << changed << "," << ones << "\n";
+        f << op << "," << changed << "," << added << "," << removed << "," << ones << "\n";
     }
 }
 
@@ -643,6 +676,30 @@ static void runExperiments(const fs::path& outDir) {
     std::ofstream report(outDir / "experiment_summary.md");
     report << "# Результаты экспериментов\n\n";
 
+    cv::Mat dilationInput = makeDilationScene();
+    std::vector<cv::Point> square3x3;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            square3x3.push_back({dx, dy});
+        }
+    }
+    const std::vector<cv::Point> horizontal3 = {{-1, 0}, {0, 0}, {1, 0}};
+    const std::vector<cv::Point> vertical3 = {{0, -1}, {0, 0}, {0, 1}};
+    cv::Mat directDilation = dilateByOffsets(dilationInput, square3x3);
+    cv::Mat decomposedDilation = dilateByOffsets(dilateByOffsets(dilationInput, horizontal3), vertical3);
+    int decompositionDiff = countChanged(directDilation, decomposedDilation);
+    saveImage(outDir / "exp0_dilation_decomposition_montage.png",
+              hconcatPanels({panel(scaledBinary(dilationInput, 8), "input"),
+                             panel(scaledBinary(directDilation, 8), "3x3 dilation"),
+                             panel(scaledBinary(decomposedDilation, 8), "1x3 then 3x1")}));
+    report << "## Эксперимент 0: разложение дилатации\n\n";
+    report << "Квадратная дилатация `3x3` сравнена с последовательной дилатацией `1x3`, затем `3x1`.\n\n";
+    report << "| Пикселей до | Пикселей после 3x3 | Пикселей после разложения | Отличий |\n";
+    report << "|---:|---:|---:|---:|\n";
+    report << "|" << countPixels(dilationInput) << "|" << countPixels(directDilation) << "|"
+           << countPixels(decomposedDilation) << "|" << decompositionDiff << "|\n\n";
+    report << "![dilation decomposition](exp0_dilation_decomposition_montage.png)\n\n";
+
     cv::Mat hmInput = makeHitMissScene();
     cv::Mat hmOutput = hitOrMiss(hmInput, rightEndpointKernel());
     saveImage(outDir / "exp1_hitmiss_input.png", scaledBinary(hmInput, 8));
@@ -655,27 +712,33 @@ static void runExperiments(const fs::path& outDir) {
            << ". Использован шаблон правого конца горизонтальной линии `000/110/000`.\n\n";
     report << "![hit-or-miss](exp1_hitmiss_montage.png)\n\n";
 
-    writeLutCsv(outDir / "exp2_lut_clean.csv", "clean");
-    writeLutCsv(outDir / "exp2_lut_bridge.csv", "bridge");
-    writeLutCsv(outDir / "exp2_lut_hbreak.csv", "hbreak");
+    std::vector<std::string> ops = {"clean", "fill", "majority", "endpoints", "spur", "bridge", "hbreak"};
+    for (const auto& op : ops) {
+        writeLutCsv(outDir / ("exp2_lut_" + op + ".csv"), op);
+    }
     writeAllLutCsv(outDir / "exp2_lut_summary.csv");
     report << "## Эксперимент 2: полный перебор 512 окрестностей\n\n";
-    report << "| Оператор | Изменяемых конфигураций | Единиц в LUT |\n";
-    report << "|---|---:|---:|\n";
-    std::vector<std::string> ops = {"clean", "fill", "majority", "endpoints", "spur", "bridge", "hbreak"};
+    report << "| Оператор | Изменяемых конфигураций | Добавляет | Удаляет | Единиц в LUT |\n";
+    report << "|---|---:|---:|---:|---:|\n";
     for (const auto& op : ops) {
         auto lut = buildLut(op);
         int changed = 0;
+        int added = 0;
+        int removed = 0;
         int ones = 0;
         for (int code = 0; code < 512; ++code) {
             bool center = bit(static_cast<uint16_t>(code), kCenter);
             bool out = lut[code] > 0;
             changed += center != out;
+            added += !center && out;
+            removed += center && !out;
             ones += out;
         }
-        report << "|" << op << "|" << changed << "|" << ones << "|\n";
+        report << "|" << op << "|" << changed << "|" << added << "|" << removed << "|" << ones << "|\n";
     }
-    report << "\nCSV: `exp2_lut_clean.csv`, `exp2_lut_bridge.csv`, `exp2_lut_hbreak.csv`, `exp2_lut_summary.csv`.\n\n";
+    report << "\nCSV сохранены для всех операторов: `exp2_lut_clean.csv`, `exp2_lut_fill.csv`, "
+           << "`exp2_lut_majority.csv`, `exp2_lut_endpoints.csv`, `exp2_lut_spur.csv`, "
+           << "`exp2_lut_bridge.csv`, `exp2_lut_hbreak.csv`, `exp2_lut_summary.csv`.\n\n";
 
     cv::Mat bridgeInput = makeBridgeScene();
     cv::Mat bridgeOutput = applyIterations(bridgeInput, "bridge", 1);

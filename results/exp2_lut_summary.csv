@@ -1,8 +1,8 @@
-operator,changed_configurations,ones_in_lut
-clean,1,255
-fill,16,272
-majority,186,256
-endpoints,248,8
-spur,8,248
-bridge,123,379
-hbreak,2,254
+operator,changed_configurations,added_configurations,removed_configurations,ones_in_lut
+clean,1,0,1,255
+fill,16,16,0,272
+majority,186,93,93,256
+endpoints,248,0,248,8
+spur,8,0,8,248
+bridge,123,123,0,379
+hbreak,2,0,2,254

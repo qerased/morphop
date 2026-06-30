@@ -55,8 +55,9 @@ make experiments
 Эта команда создаёт артефакты в каталоге `results/`:
 
 - `experiment_summary.md` — краткая сводка результатов;
+- `exp0_dilation_decomposition_montage.png` — проверка разложения дилатации `3x3` на `1x3` и `3x1`;
 - `exp1_hitmiss_montage.png` — визуализация hit-or-miss;
-- `exp2_lut_*.csv` — таблицы истинности для 512 окрестностей;
+- `exp2_lut_*.csv` — таблицы истинности для 512 окрестностей по всем LUT-операторам;
 - `exp3_bridge_montage.png` — результат `bridge`;
 - `exp4_hbreak_montage.png` — результат `hbreak`;
 - `exp5_spur_montage.png` — результат `endpoints` и `spur`.
@@ -149,7 +150,7 @@ pixels_before=... pixels_after=... components8_before=... components8_after=... 
 Основной текст работы находится в:
 
 ```text
-morphology_work_minimal.md
+work.md
 ```
 
 Статья ссылается на изображения и таблицы из `results/`, поэтому перед просмотром финальной версии стоит выполнить:
